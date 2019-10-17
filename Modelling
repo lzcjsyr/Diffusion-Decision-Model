@@ -1,0 +1,239 @@
+library("rtdists") 
+library("tidyverse")
+install.packages("rapport")
+library("rapport")
+install.packages("afex")
+library("afex")
+library("cowplot")
+
+save(dif, file = "dif_total.rda") 
+dif_total <- load("dif_total.rda")
+save(dif, file = "dif_exp.rda") 
+load("dif_exp.rda")
+
+med <- read_csv("medical_dm.csv")
+med_cut <- subset(med, med$rt >= 0.25 & med$rt <= 2.5)
+# cut 11000-10747=253; need to group by "id" & "Group"
+# remove 3 subjects with low accuracy?
+med_cut <- mutate(med_cut, response = factor(response, levels = c("blast", "non-blast")))
+med_cut <- mutate(med_cut, id = as.numeric(id)) # for-loop 
+med_novice <- subset(med_cut, med_cut$group == "novice")
+med_expert <- subset(med_cut, med_cut$group != "novice")
+
+ll_diffusion_b <- function(pars, rt, response) {
+    densities <- ddiffusion(rt, response, a=pars[1], v=pars[2], t0=pars[4], 
+                   z=pars[5], sv=pars[6], st0=pars[7])
+    if (any(densities == 0)) {return(1e6)}
+    return(-sum(log(densities)))
+}
+
+ll_diffusion_nb <- function(pars, rt, response) {
+    densities <- ddiffusion(rt, response, a=pars[1], v=pars[3], t0=pars[4], 
+                   z=pars[5], sv=pars[6], st0=pars[7])
+    if (any(densities == 0)) {return(1e6)}
+    return(-sum(log(densities)))
+}
+
+start_values <- function() {
+    c(
+        a = runif(1, 0.5, 3), v_b = rnorm(1, 0, 2), v_nb = rnorm(1, 0, 2),
+        t0 = runif(1, 0, 0.2), z = runif(1, 0.4, 0.6), sv = runif(1, 0, 0.5),
+        st0 = runif(1, 0, 0.5)
+    )}
+
+ll_twice <- function(pars, data) {
+    b <- subset(data, data$classification == "blast")
+    nb <- subset(data, data$classification == "non-blast")
+    ll_diffusion_b(pars, b$rt, b$response)+ll_diffusion_nb(pars, nb$rt, nb$response)
+}
+
+dif <- med_exp%>%
+    group_by(group, id) %>%
+    do( rerun(5, nlminb(start_values(), ll_twice, data = .,
+                        lower = c(0, -10, -10, 0), upper = c(10, 10, 10, 10))) %>% 
+    map_dfr(~as_tibble(cbind(t(.$par), logLik = -.$objective, 
+                             convergence = .$convergence))))%>%   
+    ungroup()
+
+mle_dif <- dif %>%
+    group_by(group, id) %>%
+    do(.[which.max(.$logLik), 1:9]) %>%
+    ungroup()
+
+# Detecting Identifiability Issues
+check <- data.frame()
+for (i in 1:55) {
+    temp = dif[(1+((i-1)*5)):(5*i), ]; temp = temp[, 3:10];
+    mle_dif_temp = mle_dif[i,]; mle_dif_temp = mle_dif_temp[, 3:9];
+    
+    which_max <- which(round(max(temp$logLik), 3) == round(temp$logLik, 3))
+    # return the sequence of trails with the maximum likelihood
+    which_max <- which_max[which_max != which.max(temp$logLik)] # exclude actual ML estimate
+    mle_dif_temp2 <- mle_dif_temp # copy ML estimates
+    mle_dif_temp2[abs(mle_dif_temp - temp[which_max[1], 1:7]) > 0.01] <- NA
+    
+    check <- rbind(check, mle_dif_temp2)
+}
+
+# split the data
+pars_pro <- subset(mle_dif, mle_dif$group != "novice")
+pars_unpro <- subset(mle_dif, mle_dif$group == "novice")
+pars_pro$group <- "expert"
+pars_total <- rbind(pars_pro, pars_unpro); levels(pars_total$a) <- c("expert", "novice");
+
+# fitness by choice prob
+mprop_expert <- vector()
+for (i in 1:nrow(pars_pro)){
+    
+    temp_pro <- as.numeric(pars_pro[i,3:9])
+    b_in_b = pdiffusion(Inf, response = "lower", a = temp_pro[1], v = temp_pro[2], 
+                        t0 = temp_pro[4], z = temp_pro[5], sv = temp_pro[6], st0 = temp_pro[7])
+    b_in_nb = pdiffusion(Inf, response = "lower", a = temp_pro[1], v = temp_pro[3], 
+                        t0 = temp_pro[4], z = temp_pro[5], sv = temp_pro[6], st0 = temp_pro[7])
+    mprop_expert = append(mprop_expert, (b_in_b+b_in_nb)/2)
+}
+
+# actual proportion of choosing blast for expert
+rprop_expert <- vector()
+id_expert <- unique(med_expert[["id"]])
+for (i in 1:length(id_expert)) {
+    temp_expert <- subset(med_expert, med_expert$id == id_expert[i])
+    rprop_expert = append(rprop_expert, 
+                    (sum(temp_expert$response == "blast", na.rm = TRUE))/(nrow(temp_expert)))
+}
+
+b_expert <- tibble(id_expert, rprop_expert, mprop_expert)
+names(b_expert)[2]<-paste("Real"); names(b_expert)[3]<-paste("Estimate")
+
+# calculate R squared
+SST_E = 0; SSE_E = 0;
+for (i in 1:nrow(b_expert)) {
+    SST_E = SST_E + (mean(b_expert$Estimate) - b_expert[i,3])^2 
+    SSE_E = SSE_E + (b_expert[i,3] - b_expert[i,2])^2
+}
+Rsq_Expert = as.numeric(1 - SSE_E/SST_E)
+
+# plot
+Expert_Fit <- ggplot(b_expert, aes(x=Real, y=Estimate)) + geom_point() + 
+    geom_abline(intercept = 0, slope = 1) + ggtitle("Expert Model Fitness")+ 
+    labs(x = "Data Choice Prob", y = "Computed Choice Prob") + 
+    geom_text(x = 0.48, y = 0.7, label = "R Square = ") + 
+    geom_text(x = 0.53, y = 0.7, label = round(Rsq_Expert, 3))
+
+# novice model prediction
+mprop_novice <- vector()
+for (i in 1:nrow(pars_unpro)){
+    
+    temp <- as.numeric(pars_unpro[i,3:9])
+    b_in_b = pdiffusion(Inf, response = "lower", a = temp[1], v = temp[2], 
+                        t0 = temp[4], z = temp[5], sv = temp[6], st0 = temp[7])
+    b_in_nb = pdiffusion(Inf, response = "lower", a = temp[1], v = temp[3], 
+                         t0 = temp[4], z = temp[5], sv = temp[6], st0 = temp[7])
+    mprop_novice = append(mprop_novice, (b_in_b+b_in_nb)/2)
+}
+
+# actual proportion of choosing blast for novice
+rprop_novice <- vector()
+id_novice <- unique(med_novice[["id"]])
+for (i in 1:length(id_novice)) {
+    temp_novice <- subset(med_novice, med_novice$id == id_novice[i])
+    rprop_novice = append(rprop_novice, 
+                    (sum(temp_novice$response == "blast", na.rm = TRUE))/(nrow(temp_novice)))
+}
+
+b_novice <- tibble(id_novice,rprop_novice, mprop_novice)
+names(b_novice)[2]<-paste("Real"); names(b_novice)[3]<-paste("Estimate")
+
+# calculate R squared
+SST_N = 0; SSE_N = 0;
+for (i in 1:nrow(b_novice)) {
+    SST_N = SST_N + (mean(b_novice$Estimate) - b_novice[i,3])^2 
+    SSE_N = SSE_N + (b_novice[i,3] - b_novice[i,2])^2
+}
+Rsq_Novice = as.numeric(1 - SSE_N/SST_N)
+
+# plot
+Novice_Fit <- ggplot(b_novice, aes(x=Real, y=Estimate)) + geom_point() + 
+    geom_abline(intercept = 0, slope = 1) + ggtitle("Novice Model Fitness")+ 
+    labs(x = "Data Choice Prob", y = "Computed Choice Prob") + 
+    geom_text(x = 0.25, y = 0.8, label = "R Square = ") + 
+    geom_text(x = 0.36, y = 0.8, label = round(Rsq_Novice, 3))
+
+plot_grid(Expert_Fit, Novice_Fit)
+
+#fitness by mean rt
+
+diffusion_df <- function(pars, n = 400, start = 0, end = 3) 
+{
+    rt <- seq(start, end, length.out = n)
+    tibble(
+        rt = rt,
+        blast = ddiffusion(rt, response = "upper", a = pars[1], v = pars[3], 
+                           t0 = pars[4], z = pars[5], sv = pars[6], st0 = pars[7]),
+        non_blast = ddiffusion(rt, response = "lower", a = pars[1], v = pars[3], 
+                           t0 = pars[4], z = pars[5], sv = pars[6], st0 = pars[7])
+    ) %>%
+        gather(key = "response", value = "Density", blast, non_blast) %>% 
+        mutate(response = factor(response, levels = c("non_blast", "blast")))
+}
+
+mrt_pro <- vector()
+for (i in 1:nrow(pars_pro)){
+    temp <- as.numeric(pars_pro[i, 3:9])
+    temp_model <- diffusion_df(temp, n = 500, start = 0, end = 5)
+    mrt_pro <- append(mrt_pro, sum(temp_model$rt*temp_model$Density))
+}
+
+mrt_pro <- vector()
+for (i in 1:nrow(pars_pro)){
+    
+    temp <- as.numeric(pars_pro[i,3:9])
+    
+    pure_dd_nb <- function (rt) {
+        ddiffusion(rt, response = "upper", a = temp[1], v = temp[3], 
+                   t0 = temp[4], z = temp[5], sv = temp[6], st0 = temp[7])*
+            pdiffusion(Inf, response = "upper", a = temp[1], v = temp[3], 
+                        t0 = temp[4], z = temp[5], sv = temp[6], st0 = temp[7])+
+            ddiffusion(rt, response = "lower", a = temp[1], v = temp[3], 
+                       t0 = temp[4], z = temp[5], sv = temp[6], st0 = temp[7])*
+            pdiffusion(Inf, response = "lower", a = temp[1], v = temp[3], 
+                       t0 = temp[4], z = temp[5], sv = temp[6], st0 = temp[7])
+    }
+    mrt_pro = append(mrt_pro, integrate(pure_dd_b, lower = 0, upper = Inf)$value*0.5+
+                         integrate(pure_dd_nb, lower = 0, upper = Inf)$value*0.5)
+}
+
+rrt_pro <- vector()
+id_expert <- unique(med_expert[["id"]])
+for (i in 1:length(id_expert)) {
+    temp <- subset(med_expert, med_expert$id == id_expert[i])
+    rrt_pro = append(rrt_pro, mean(as.numeric(temp$rt)))
+}
+
+meanpro_fit <- tibble (pars_pro$id, rrt_pro, mrt_pro)
+names(meanpro_fit)[2]<-paste("Real"); names(meanpro_fit)[3]<-paste("Estimate")
+ggplot(meanpro_fit, aes(x=Real, y=Estimate)) + geom_point() + 
+    geom_abline(intercept = 0, slope = 1)
+
+
+rrt_unpro <- vector()
+id_novice <- unique(med_novice[["id"]])
+for (i in 1:length(id_novice)) {
+    temp <- subset(med_novice, med_novice$id == id_novice[i])
+    rrt_unpro = append(rrt_unpro, mean(as.numeric(temp$rt)))
+}
+
+ave_pro_rt <- as.numeric(colMeans(pars_pro[3:9]))
+ave_unpro_rt <- as.numeric(colMeans(pars_unpro[3:9]))
+
+# use ANOVA to compare the individual-level parameter estimates between the two group
+
+boxplot(pars_total$a ~ pars_total$group)
+
+par_a <- aov(pars_total$a ~ pars_total$group); summary(par_a) #sig
+par_v_b <- aov(pars_total$v_b ~ pars_total$group); summary(par_v_b) #sig
+par_v_nb <- aov(pars_total$v_nb ~ pars_total$group); summary(par_v_nb) #unsig
+par_t0 <- aov(pars_total$t0 ~ pars_total$group); summary(par_t0) #unsig
+par_z <- aov(pars_total$z ~ pars_total$group); summary(par_z) #sig
+par_sv <- aov(pars_total$sv ~ pars_total$group); summary(par_sv) #unsig
+par_st0 <- aov(pars_total$st0 ~ pars_total$group); summary(par_st0) #sig
