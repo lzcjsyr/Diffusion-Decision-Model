@@ -1,0 +1,105 @@
+# calculate the predictions of the model (expert)
+mprop_expert <- vector()
+for (i in 1:nrow(pars_pro)){
+    
+    temp_pro <- as.numeric(pars_pro[i,3:11])
+    b_in_b_e = pdiffusion(Inf, response = "lower", a = temp_pro[1], v = temp_pro[2], 
+                        t0 = temp_pro[6], z = temp_pro[7], sv = temp_pro[8], st0 = temp_pro[9])
+    mprop_expert = append(mprop_expert, b_in_b_e)
+    b_in_nb_e = pdiffusion(Inf, response = "lower", a = temp_pro[1], v = temp_pro[3], 
+                        t0 = temp_pro[6], z = temp_pro[7], sv = temp_pro[8], st0 = temp_pro[9])
+    mprop_expert = append(mprop_expert, b_in_nb_e)
+    b_in_b_h = pdiffusion(Inf, response = "lower", a = temp_pro[1], v = temp_pro[4], 
+                        t0 = temp_pro[6], z = temp_pro[7], sv = temp_pro[8], st0 = temp_pro[9])
+    mprop_expert = append(mprop_expert, b_in_b_h)
+    b_in_nb_h = pdiffusion(Inf, response = "lower", a = temp_pro[1], v = temp_pro[5], 
+                        t0 = temp_pro[6], z = temp_pro[7], sv = temp_pro[8], st0 = temp_pro[9])
+    mprop_expert = append(mprop_expert, b_in_nb_h)
+}
+
+# observed results (expert)
+rprop_expert <- vector()
+id_expert <- unique(med_expert[["id"]])
+for (i in 1:length(id_expert)) {
+    temp <- subset(med_expert, med_expert$id == id_expert[i])
+    BE <- subset(temp, temp$classification == "blast" & temp$difficulty == "easy")
+    rprop_expert = append(rprop_expert,sum(BE$response == "blast", na.rm = TRUE)/(nrow(BE)))
+    NBE <- subset(temp, temp$classification == "non-blast" & temp$difficulty == "easy")
+    rprop_expert = append(rprop_expert,sum(NBE$response == "blast", na.rm = TRUE)/(nrow(NBE)))
+    BH <- subset(temp, temp$classification == "blast" & temp$difficulty == "hard")
+    rprop_expert = append(rprop_expert,sum(BH$response == "blast", na.rm = TRUE)/(nrow(BH)))
+    NBH <- subset(temp, temp$classification == "non-blast" & temp$difficulty == "hard")
+    rprop_expert = append(rprop_expert,sum(NBH$response == "blast", na.rm = TRUE)/(nrow(NBH)))
+}
+
+# combind the predictions and observed results (expert)
+b_expert <- tibble(class_diff = NA, rprop_expert, mprop_expert)
+for (i in 1:(nrow(b_expert)/4)) {
+    b_expert[(i-1)*4+1, 1] = "blast&easy";b_expert[(i-1)*4+2, 1] = "non-blast&easy"; 
+    b_expert[(i-1)*4+3, 1] = "blast&hard";b_expert[(i-1)*4+4, 1] = "non-blast&hard"; 
+}
+names(b_expert)[2]<-paste("Real"); names(b_expert)[3]<-paste("Estimate")
+
+Rsq_Expert = R_square(b_expert)
+
+# plot (expert)
+Expert_Fit <- ggplot(b_expert, aes(x=Real, y=Estimate, color = class_diff)) + 
+    geom_point() + 
+    geom_abline(intercept = 0, slope = 1) + ggtitle("Expert Model Fitness")+ 
+    labs(x = "Data Choice Prob", y = "Computed Choice Prob") + 
+    geom_text(x = 0.1, y = 1.0, label = "R^2 = ", color = "black") + 
+    geom_text(x = 0.23, y = 1.0, label = round(Rsq_Expert, 3), color = "black")
+
+# calculate the predictions of the model (novice)
+mprop_novice <- vector()
+for (i in 1:nrow(pars_unpro)){
+    
+    temp <- as.numeric(pars_unpro[i,3:11])
+    b_in_b_e = pdiffusion(Inf, response = "lower", a = temp[1], v = temp[2], 
+                          t0 = temp[6], z = temp[7], sv = temp[8], st0 = temp[9])
+    mprop_novice = append(mprop_novice, b_in_b_e)
+    b_in_nb_e = pdiffusion(Inf, response = "lower", a = temp[1], v = temp[3], 
+                           t0 = temp[6], z = temp[7], sv = temp[8], st0 = temp[9])
+    mprop_novice = append(mprop_novice, b_in_nb_e)
+    b_in_b_h = pdiffusion(Inf, response = "lower", a = temp[1], v = temp[4], 
+                          t0 = temp[6], z = temp[7], sv = temp[8], st0 = temp[9])
+    mprop_novice = append(mprop_novice, b_in_b_h)
+    b_in_nb_h = pdiffusion(Inf, response = "lower", a = temp[1], v = temp[5], 
+                           t0 = temp[6], z = temp[7], sv = temp[8], st0 = temp[9])
+    mprop_novice = append(mprop_novice, b_in_nb_h)
+}
+
+# # observed results (novice)
+rprop_novice <- vector()
+id_novice <- unique(med_novice[["id"]])
+for (i in 1:length(id_novice)) {
+    temp <- subset(med_novice, med_novice$id == id_novice[i])
+    BE <- subset(temp, temp$classification == "blast" & temp$difficulty == "easy")
+    rprop_novice = append(rprop_novice,sum(BE$response == "blast", na.rm = TRUE)/(nrow(BE)))
+    NBE <- subset(temp, temp$classification == "non-blast" & temp$difficulty == "easy")
+    rprop_novice = append(rprop_novice,sum(NBE$response == "blast", na.rm = TRUE)/(nrow(NBE)))
+    BH <- subset(temp, temp$classification == "blast" & temp$difficulty == "hard")
+    rprop_novice = append(rprop_novice,sum(BH$response == "blast", na.rm = TRUE)/(nrow(BH)))
+    NBH <- subset(temp, temp$classification == "non-blast" & temp$difficulty == "hard")
+    rprop_novice = append(rprop_novice,sum(NBH$response == "blast", na.rm = TRUE)/(nrow(NBH)))
+}
+
+# combind the predictions and observed results (novice)
+b_novice <- tibble(class_diff = NA,rprop_novice, mprop_novice)
+for (i in 1:(nrow(b_novice)/4)) {
+    b_novice[(i-1)*4+1, 1] = "blast&easy";b_novice[(i-1)*4+2, 1] = "non-blast&easy"; 
+    b_novice[(i-1)*4+3, 1] = "blast&hard";b_novice[(i-1)*4+4, 1] = "non-blast&hard"; 
+}
+names(b_novice)[2]<-paste("Real"); names(b_novice)[3]<-paste("Estimate")
+
+Rsq_Novice = R_square(b_novice)
+
+# plot (novice)
+Novice_Fit <- ggplot(b_novice, aes(x=Real, y=Estimate, color = class_diff)) + 
+    geom_point() + 
+    geom_abline(intercept = 0, slope = 1) + ggtitle("Novice Model Fitness")+ 
+    labs(x = "Data Choice Prob", y = "Computed Choice Prob") + 
+    geom_text(x = 0.1, y = 1.0, label = "R^2 = ", color = "black") + 
+    geom_text(x = 0.23, y = 1.0, label = round(Rsq_Novice, 3), color = "black")
+
+plot_grid(Expert_Fit, Novice_Fit, labels = c("A", "B")) 
