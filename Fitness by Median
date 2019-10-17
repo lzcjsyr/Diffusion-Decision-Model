@@ -1,0 +1,93 @@
+# rt for expert
+weight_median <- function(pars, drift_rate) {
+    
+    qdiffusion(0.5, response = "upper", a = pars[1], v = pars[drift_rate], 
+               t0 = pars[6], z = pars[7], sv = pars[8], st0 = pars[9], scale_p = TRUE)*
+        pdiffusion(Inf, response = "upper", a = pars[1], v = pars[drift_rate], 
+                   t0 = pars[6], z = pars[7], sv = pars[8], st0 = pars[9])+
+        qdiffusion(0.5, response = "lower", a = pars[1], v = pars[drift_rate], 
+                   t0 = pars[6], z = pars[7], sv = pars[8], st0 = pars[9], scale_p = TRUE)*
+        pdiffusion(Inf, response = "lower", a = pars[1], v = pars[drift_rate], 
+                   t0 = pars[6], z = pars[7], sv = pars[8], st0 = pars[9])
+}
+
+median_mrt_pro <- vector()
+for (i in 1:nrow(pars_pro)){
+    temp <- as.numeric(pars_pro[i,3:11])
+    median_mrt_pro = append(median_mrt_pro, weight_median(temp, 2))
+    median_mrt_pro = append(median_mrt_pro, weight_median(temp, 3))
+    median_mrt_pro = append(median_mrt_pro, weight_median(temp, 4))
+    median_mrt_pro = append(median_mrt_pro, weight_median(temp, 5))
+}
+
+median_rrt_pro <- vector()
+id_expert <- unique(med_expert[["id"]])
+for (i in 1:length(id_expert)) {
+    temp <- subset(med_expert, med_expert$id == id_expert[i])
+    temp_BE = subset(temp, temp$classification == "blast" & temp$difficulty == "easy")
+    median_rrt_pro = append(median_rrt_pro, median(as.numeric(temp_BE$rt)))
+    temp_NBE = subset(temp, temp$classification == "non-blast" & temp$difficulty == "easy")
+    median_rrt_pro = append(median_rrt_pro, median(as.numeric(temp_NBE$rt)))
+    temp_BH = subset(temp, temp$classification == "blast" & temp$difficulty == "hard")
+    median_rrt_pro = append(median_rrt_pro, median(as.numeric(temp_BH$rt)))
+    temp_NBH = subset(temp, temp$classification == "non-blast" & temp$difficulty == "hard")
+    median_rrt_pro = append(median_rrt_pro, median(as.numeric(temp_NBH$rt)))
+}
+
+median_pro_fit <- tibble(class_diff = NA, median_rrt_pro, median_mrt_pro)
+for (i in 1:(nrow(median_pro_fit)/4)) {
+    median_pro_fit[(i-1)*4+1, 1] = "blast&easy";median_pro_fit[(i-1)*4+2, 1] = "non-blast&easy"; 
+    median_pro_fit[(i-1)*4+3, 1] = "blast&hard";median_pro_fit[(i-1)*4+4, 1] = "non-blast&hard"; 
+}
+names(median_pro_fit)[2]<-paste("Real"); names(median_pro_fit)[3]<-paste("Estimate")
+
+median_Rsq_Expert = R_square(median_pro_fit)
+
+Expert_median_Fit <- ggplot(median_pro_fit, aes(x=Real, y=Estimate, color = class_diff)) + 
+    geom_point() + 
+    geom_abline(intercept = 0, slope = 1) + ggtitle("Expert Model Fitness (Median)")+ 
+    labs(x = "Data Median RT", y = "Computed Median RT") + 
+    geom_text(x = 0.65, y = 1.1, label = "R Square = ", color = "black") + 
+    geom_text(x = 0.78, y = 1.1, label = round(median_Rsq_Expert, 3), color = "black")
+
+# rt for Novice
+median_mrt_unpro <- vector()
+for (i in 1:nrow(pars_unpro)){
+    temp <- as.numeric(pars_unpro[i,3:11])
+    median_mrt_unpro = append(median_mrt_unpro, weight_median(temp, 2))
+    median_mrt_unpro = append(median_mrt_unpro, weight_median(temp, 3))
+    median_mrt_unpro = append(median_mrt_unpro, weight_median(temp, 4))
+    median_mrt_unpro = append(median_mrt_unpro, weight_median(temp, 5))
+}
+
+median_rrt_unpro <- vector()
+id_novice <- unique(med_novice[["id"]])
+for (i in 1:length(id_novice)) {
+    temp <- subset(med_novice, med_novice$id == id_novice[i])
+    temp_BE = subset(temp, temp$classification == "blast" & temp$difficulty == "easy")
+    median_rrt_unpro = append(median_rrt_unpro, median(as.numeric(temp_BE$rt)))
+    temp_NBE = subset(temp, temp$classification == "non-blast" & temp$difficulty == "easy")
+    median_rrt_unpro = append(median_rrt_unpro, median(as.numeric(temp_NBE$rt)))
+    temp_BH = subset(temp, temp$classification == "blast" & temp$difficulty == "hard")
+    median_rrt_unpro = append(median_rrt_unpro, median(as.numeric(temp_BH$rt)))
+    temp_NBH = subset(temp, temp$classification == "non-blast" & temp$difficulty == "hard")
+    median_rrt_unpro = append(median_rrt_unpro, median(as.numeric(temp_NBH$rt)))
+}
+
+median_unpro_fit <- tibble(class_diff = NA, median_rrt_unpro, median_mrt_unpro)
+for (i in 1:(nrow(median_unpro_fit)/4)) {
+    median_unpro_fit[(i-1)*4+1, 1] = "blast&easy";median_unpro_fit[(i-1)*4+2, 1] = "non-blast&easy"; 
+    median_unpro_fit[(i-1)*4+3, 1] = "blast&hard";median_unpro_fit[(i-1)*4+4, 1] = "non-blast&hard"; 
+}
+names(median_unpro_fit)[2]<-paste("Real"); names(median_unpro_fit)[3]<-paste("Estimate")
+
+median_Rsq_Novice = R_square(median_unpro_fit)
+
+Novice_median_Fit <- ggplot(median_unpro_fit, aes(x=Real, y=Estimate, color = class_diff)) + 
+    geom_point() + 
+    geom_abline(intercept = 0, slope = 1) + ggtitle("Novice Model Fitness (Median)")+ 
+    labs(x = "Data Median RT", y = "Computed Median RT") + 
+    geom_text(x = 0.49, y = 1.2, label = "R Square = ", color = "black") + 
+    geom_text(x = 0.66, y = 1.2, label = round(median_Rsq_Novice, 3), color = "black")
+    
+plot_grid(Expert_median_Fit, Novice_median_Fit)
