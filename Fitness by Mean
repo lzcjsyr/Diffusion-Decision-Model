@@ -1,0 +1,102 @@
+# mean function
+mean_diffusion <- function(pars, drift_rate) {
+    
+    nb <- function(rt){
+        rt*ddiffusion(rt, response = "upper", a = pars[1], v = pars[drift_rate], 
+                      t0 = pars[6], z = pars[7], sv = pars[8], st0 = pars[9])}
+    b <- function(rt){
+        rt*ddiffusion(rt, response = "lower", a = pars[1], v = pars[drift_rate], 
+                      t0 = pars[6], z = pars[7], sv = pars[8], st0 = pars[9])}
+    integrate(nb, lower = 0, upper = Inf)$value + integrate(b, lower = 0, upper = Inf)$value
+}
+
+# predicted mean (expert)
+mrt_pro <- vector()
+for (i in 1:nrow(pars_pro)){
+    
+    temp <- as.numeric(pars_pro[i,3:11])
+    mrt_pro <- append(mrt_pro, mean_diffusion(temp, 2))
+    mrt_pro <- append(mrt_pro, mean_diffusion(temp, 3))
+    mrt_pro <- append(mrt_pro, mean_diffusion(temp, 4))
+    mrt_pro <- append(mrt_pro, mean_diffusion(temp, 5))
+}
+
+# observed mean (expert)
+rrt_pro <- vector()
+id_expert <- unique(med_expert[["id"]])
+for (i in 1:length(id_expert)) {
+    temp <- subset(med_expert, med_expert$id == id_expert[i])
+    temp_BE = subset(temp, temp$classification == "blast" & temp$difficulty == "easy")
+    rrt_pro = append(rrt_pro, mean(as.numeric(temp_BE$rt)))
+    temp_NBE = subset(temp, temp$classification == "non-blast" & temp$difficulty == "easy")
+    rrt_pro = append(rrt_pro, mean(as.numeric(temp_NBE$rt)))
+    temp_BH = subset(temp, temp$classification == "blast" & temp$difficulty == "hard")
+    rrt_pro = append(rrt_pro, mean(as.numeric(temp_BH$rt)))
+    temp_NBH = subset(temp, temp$classification == "non-blast" & temp$difficulty == "hard")
+    rrt_pro = append(rrt_pro, mean(as.numeric(temp_NBH$rt)))
+}
+
+# combind the predictions and observed results (expert)
+mean_pro_fit <- tibble(class_diff = NA, rrt_pro, mrt_pro)
+for (i in 1:(nrow(mean_pro_fit)/4)) {
+    mean_pro_fit[(i-1)*4+1,1]="blast&easy";mean_pro_fit[(i-1)*4+2,1]="non-blast&easy"; 
+    mean_pro_fit[(i-1)*4+3,1]="blast&hard";mean_pro_fit[(i-1)*4+4,1]="non-blast&hard"; 
+}
+names(mean_pro_fit)[2]<-paste("Real"); names(mean_pro_fit)[3]<-paste("Estimate")
+
+mRsq_Expert = R_square(mean_pro_fit)
+
+# plot
+Expert_mFit <- ggplot(mean_pro_fit, aes(x=Real, y=Estimate, color = class_diff)) + 
+    geom_point() + 
+    geom_abline(intercept = 0, slope = 1) + ggtitle("Expert Model Fitness")+ 
+    labs(x = "Data Mean RT", y = "Computed Mean RT") + 
+    geom_text(x = 0.68, y = 1.5, label = "R^2 = ", color = "black") + 
+    geom_text(x = 0.80, y = 1.5, label = round(mRsq_Expert, 3), color = "black")
+
+# predicted mean (novice)
+mrt_unpro <- vector()
+for (i in 1:nrow(pars_unpro)){
+    
+    temp <- as.numeric(pars_unpro[i,3:11])
+    mrt_unpro <- append(mrt_unpro, mean_diffusion(temp, 2))
+    mrt_unpro <- append(mrt_unpro, mean_diffusion(temp, 3))
+    mrt_unpro <- append(mrt_unpro, mean_diffusion(temp, 4))
+    mrt_unpro <- append(mrt_unpro, mean_diffusion(temp, 5))
+}
+
+# observed mean (novice)
+rrt_unpro <- vector()
+id_novice <- unique(med_novice[["id"]])
+for (i in 1:length(id_novice)) {
+    temp <- subset(med_novice, med_novice$id == id_novice[i])
+    temp_BE = subset(temp, temp$classification == "blast" & temp$difficulty == "easy")
+    rrt_unpro = append(rrt_unpro, mean(as.numeric(temp_BE$rt)))
+    temp_NBE = subset(temp, temp$classification == "non-blast" & temp$difficulty == "easy")
+    rrt_unpro = append(rrt_unpro, mean(as.numeric(temp_NBE$rt)))
+    temp_BH = subset(temp, temp$classification == "blast" & temp$difficulty == "hard")
+    rrt_unpro = append(rrt_unpro, mean(as.numeric(temp_BH$rt)))
+    temp_NBH = subset(temp, temp$classification == "non-blast" & temp$difficulty == "hard")
+    rrt_unpro = append(rrt_unpro, mean(as.numeric(temp_NBH$rt)))
+}
+
+# combind the predictions and observed results (expert)
+mean_unpro_fit <- tibble(class_diff = NA, rrt_unpro, mrt_unpro)
+for (i in 1:(nrow(mean_unpro_fit)/4)) {
+    mean_unpro_fit[(i-1)*4+1,1]="blast&easy";mean_unpro_fit[(i-1)*4+2,1]="non-blast&easy"; 
+    mean_unpro_fit[(i-1)*4+3,1]="blast&hard";mean_unpro_fit[(i-1)*4+4,1]="non-blast&hard"; 
+}
+names(mean_unpro_fit)[2]<-paste("Real"); names(mean_unpro_fit)[3]<-paste("Estimate")
+
+mRsq_Novice = R_square(mean_unpro_fit)
+
+# plot
+Novice_mFit <- ggplot(mean_unpro_fit, aes(x=Real, y=Estimate, color = class_diff)) + 
+    geom_point() + 
+    geom_abline(intercept = 0, slope = 1) + ggtitle("Novice Model Fitness")+ 
+    labs(x = "Data Mean RT", y = "Computed Mean RT") + 
+    geom_text(x = 0.55, y = 1.5, label = "R^2 = ", color = "black") + 
+    geom_text(x = 0.68, y = 1.5, label = round(mRsq_Novice, 3), color = "black")
+
+plot_grid(Expert_mFit, Novice_mFit, labels = c("E", "F"))
+
